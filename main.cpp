@@ -368,20 +368,23 @@ namespace
                 size_t shotsFired;
                 int totalDamage;
             };
-            using List = list<pair<Cmd, State>>;
-            List queue;
+            struct Candidate
+            {
+                Cmd initialCommand;
+                Cmd currentCommand;
+                State state;
+            };
+            using CandidateList = list<Candidate>;
+            CandidateList candidates;
             {
                 Cmd::Data moveCmdData;
                 moveCmdData.pos = selectPosition(world);
                 if(insideGameZone(moveCmdData.pos))
                 {
                     Cmd moveCmd{Cmd::TYPE_MOVE, moveCmdData};
-                    const auto nw = eval(world, moveCmd);
-                    if(nw.second)
-                    {
-                        queue.push_back(make_pair(moveCmd,
-                                State{nw.first, 0, 0}));
-                    }
+                    candidates.push_back(
+                        Candidate{moveCmd, moveCmd,
+                        State{world, 0, 0}});
                 }
             }
             if(!world.enemies.empty())
@@ -390,27 +393,19 @@ namespace
                 const auto closestEnemyId = selectClosestEnemy(world);
                 Cmd::Data shootCmdData;
                 shootCmdData.id = enemyId;
-                const Cmd shootCmd{Cmd::TYPE_SHOOT, shootCmdData};
-                const auto nw = eval(world, shootCmd);
-                if(nw.second)
                 {
-                    const auto totalDamage = enemiesLifes(world) -
-                        enemiesLifes(nw.first);
-                    queue.push_back(make_pair(shootCmd,
-                            State{nw.first, 1, totalDamage}));
+                    const Cmd shootCmd{Cmd::TYPE_SHOOT, shootCmdData};
+                    candidates.push_back(
+                        Candidate{shootCmd, shootCmd,
+                        State{world, 0, 0}});
                 }
                 if(enemyId != closestEnemyId)
                 {
                     shootCmdData.id = closestEnemyId;
                     const Cmd shootCmd{Cmd::TYPE_SHOOT, shootCmdData};
-                    const auto nw = eval(world, shootCmd);
-                    if(nw.second)
-                    {
-                        const auto totalDamage = enemiesLifes(world) -
-                            enemiesLifes(nw.first);
-                        queue.push_back(make_pair(shootCmd,
-                                State{nw.first, 1, totalDamage}));
-                    }
+                    candidates.push_back(
+                        Candidate{shootCmd, shootCmd,
+                        State{world, 0, 0}});
                 }
             }
             {
@@ -420,12 +415,8 @@ namespace
                     Cmd::Data runCmdData;
                     runCmdData.pos = runRes.first;
                     Cmd runCmd{Cmd::TYPE_MOVE, runCmdData};
-                    const auto nw = eval(world, runCmd);
-                    if(nw.second)
-                    {
-                        queue.push_back(make_pair(runCmd,
-                                State{nw.first, 0, 0}));
-                    }
+                    candidates.push_back(Candidate{
+                        runCmd, runCmd, State{world, 0, 0}});
                 }
             }
             Cmd::Data d;
@@ -434,106 +425,98 @@ namespace
                 Criteria{numeric_limits<size_t>::max(), 0,
                 numeric_limits<size_t>::max(), 0});
             bool foundSol = false;
-            const auto timeLimit = game::TIME_LIMIT*0.9;
+            const auto timeLimit = game::TIME_LIMIT*0.8;
             const auto beginTime = Clock::now();
             size_t depth = 1;
             for(;; ++depth)
             {
-                List nextQueue;
+                CandidateList nextCandidates;
                 bool curFoundSol = false;
                 auto curBestResult = make_pair(Cmd{Cmd::TYPE_MOVE, d},
                     Criteria{numeric_limits<size_t>::max(), 0,
                     numeric_limits<size_t>::max(), 0});
                 bool timeout = false;
-                if(queue.empty())
+                if(candidates.empty())
                     break;
-                for(const auto &cur : queue)
+                for(const auto &cur : candidates)
                 {
-                    auto handler = [&cur, &nextQueue, &curBestResult, &curFoundSol](const State &state, const Cmd &cmd) {
-                        if(cmd.type == Cmd::TYPE_MOVE)
-                        {
-                            if(!insideGameZone(cmd.data.pos))
-                            {
-                                return;
-                            }
-                        }
-                        const auto &w = eval(state.world, cmd);
-                        if(w.second)
-                        {
-                            int totalDamage = state.totalDamage;
-                            size_t shotsFired = state.shotsFired;
-                            if(cmd.type == Cmd::TYPE_SHOOT)
-                            {
-                                totalDamage += enemiesLifes(state.world) -
-                                    enemiesLifes(w.first);
-                                shotsFired += 1;
-                            }
-                            nextQueue.push_back(make_pair(cur.first,
-                                    State{w.first, shotsFired, totalDamage}));
-                            Criteria currentCriteria{shotsFired,
-                                w.first.dataPoints.size(), w.first.enemies.size(),
-                                totalDamage};
-                            if(curBestResult.second < currentCriteria)
-                            {
-                                curBestResult = make_pair(cur.first, currentCriteria);
-                                curFoundSol = true;
-                            }
-                        }
-                    };
-                    {
-                        Cmd::Data moveCmdData;
-                        moveCmdData.pos = selectPosition(cur.second.world);
-                        Cmd moveCmd{Cmd::TYPE_MOVE, moveCmdData};
-                        handler(cur.second, moveCmd);
-                    }
                     if(Clock::now() - beginTime >= timeLimit)
                     {
                         timeout = true;
                         break;
                     }
-                    if(!cur.second.world.enemies.empty())
+                    const auto &cmd = cur.currentCommand;
+                    if(cmd.type == Cmd::TYPE_MOVE)
                     {
-                        const auto enemyId = selectEnemy(cur.second.world);
-                        const auto closestEnemyId =
-                            selectClosestEnemy(cur.second.world);
-                        Cmd::Data shootCmdData;
-                        shootCmdData.id = enemyId;
-                        handler(cur.second, Cmd{Cmd::TYPE_SHOOT, shootCmdData});
-                        if(Clock::now() - beginTime >= timeLimit)
-                        {
-                            timeout = true;
-                            break;
-                        }
-                        if(enemyId != closestEnemyId)
-                        {
-                            shootCmdData.id = closestEnemyId;
-                            handler(cur.second, Cmd{Cmd::TYPE_SHOOT, shootCmdData});
-                        }
+                        if(!insideGameZone(cmd.data.pos))
+                            continue;
                     }
+                    const auto w = eval(cur.state.world, cur.currentCommand);
                     if(Clock::now() - beginTime >= timeLimit)
                     {
                         timeout = true;
                         break;
                     }
+                    if(w.second)
                     {
-                        Cmd::Data runCmdData;
-                        const auto runPosRes = selectRunPosition(cur.second.world);
-                        if(runPosRes.second)
+                        int totalDamage = cur.state.totalDamage;
+                        size_t shotsFired = cur.state.shotsFired;
+                        if(cmd.type == Cmd::TYPE_SHOOT)
                         {
-                            runCmdData.pos = runPosRes.first;
-                            Cmd runCmd{Cmd::TYPE_MOVE, runCmdData};
-                            handler(cur.second, runCmd);
+                            totalDamage += enemiesLifes(cur.state.world) -
+                                enemiesLifes(w.first);
+                            shotsFired += 1;
                         }
-                    }
-                    if(Clock::now() - beginTime >= timeLimit)
-                    {
-                        timeout = true;
-                        break;
+                        const State nextState{w.first, shotsFired, totalDamage};
+                        Criteria currentCriteria{shotsFired,
+                            w.first.dataPoints.size(), w.first.enemies.size(),
+                            totalDamage};
+                        if(curBestResult.second < currentCriteria)
+                        {
+                            curBestResult = make_pair(cur.initialCommand, currentCriteria);
+                            curFoundSol = true;
+                        }
+                        {
+                            Cmd::Data moveCmdData;
+                            moveCmdData.pos = selectPosition(w.first);
+                            Cmd moveCmd{Cmd::TYPE_MOVE, moveCmdData};
+                            nextCandidates.push_back(Candidate{
+                                cur.initialCommand, moveCmd, nextState});
+                        }
+                        if(!w.first.enemies.empty())
+                        {
+                            const auto enemyId = selectEnemy(w.first);
+                            const auto closestEnemyId =
+                                selectClosestEnemy(w.first);
+                            Cmd::Data shootCmdData;
+                            shootCmdData.id = enemyId;
+                            nextCandidates.push_back(Candidate{
+                                cur.initialCommand, Cmd{Cmd::TYPE_SHOOT, shootCmdData},
+                                nextState});
+                            if(enemyId != closestEnemyId)
+                            {
+                                shootCmdData.id = closestEnemyId;
+                                nextCandidates.push_back(Candidate{
+                                    cur.initialCommand, Cmd{Cmd::TYPE_SHOOT, shootCmdData},
+                                    nextState});
+                            }
+                        }
+                        {
+                            Cmd::Data runCmdData;
+                            const auto runPosRes = selectRunPosition(w.first);
+                            if(runPosRes.second)
+                            {
+                                runCmdData.pos = runPosRes.first;
+                                Cmd runCmd{Cmd::TYPE_MOVE, runCmdData};
+                                nextCandidates.push_back(Candidate{
+                                    cur.initialCommand, runCmd, nextState});
+                            }
+                        }
                     }
                 }
                 if(!timeout)
                 {
-                    queue = move(nextQueue);
+                    candidates = move(nextCandidates);
                     bestResult = move(curBestResult);
                     foundSol = curFoundSol;
                 }
@@ -612,18 +595,18 @@ namespace
 
         static Point selectPosition(const World &w)
         {
-            const auto &points = w.dataPoints;
-            if(!points.empty())
+            const auto &enemies = w.enemies;
+            if(!enemies.empty())
             {
                 long long int avgX = 0;
                 long long int avgY = 0;
-                for(const auto &p : points)
+                for(const auto &p : enemies)
                 {
                     avgX += p.pos.x;
                     avgY += p.pos.y;
                 }
-                avgX /= points.size();
-                avgY /= points.size();
+                avgX /= enemies.size();
+                avgY /= enemies.size();
                 const Point target{static_cast<int>(avgX),
                     static_cast<int>(avgY)};
                 return target;
