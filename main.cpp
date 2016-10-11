@@ -15,6 +15,7 @@
 #include <chrono>
 #include <stdexcept>
 #include <memory>
+#include <set>
 
 using namespace std;
 
@@ -36,6 +37,13 @@ namespace
     inline bool operator!=(const Point &left, const Point &right)
     {
         return !(left == right);
+    }
+    inline bool operator<(const Point &left, const Point &right)
+    {
+        return
+            (left.x < right.x ||
+             (left.x == right.x &&
+              left.y < right.y));
     }
 
     struct Enemy
@@ -259,7 +267,7 @@ namespace
         size_t aliveEnemies;
         int totalDamage;
     };
-    static bool operator<(const Criteria &left, const Criteria &right)
+    bool operator<(const Criteria &left, const Criteria &right)
     {
         return
             (left.alivePoints < right.alivePoints ||
@@ -282,6 +290,29 @@ namespace
     {
         return (left.alivePoints < right.alivePoints);
     }
+    using IdSet = set<int>;
+    struct ReducedState
+    {
+        Point playerPos;
+        size_t shotsFired;
+        int totalDamage;
+        IdSet enemies;
+        IdSet points;
+    };
+    bool operator<(const ReducedState &left, const ReducedState &right)
+    {
+        return
+            (left.playerPos < right.playerPos ||
+             (left.playerPos == right.playerPos &&
+              (left.shotsFired < right.shotsFired ||
+               (left.shotsFired == right.shotsFired &&
+                (left.totalDamage < right.totalDamage ||
+                 (left.totalDamage == right.totalDamage &&
+                  (left.enemies < right.enemies ||
+                   (left.enemies == right.enemies &&
+                    (left.points < right.points)))))))));
+    }
+    using ReducedStateSet = set<ReducedState>;
 
     ostream &operator<<(ostream &stream, const Point &p)
     {
@@ -466,9 +497,12 @@ namespace
             :searchCmdProducers(move(searchCmdProducers)),
             root(), nextRoot(), bestLeaf(), totalBestLeaf(),
             unfinishedBestLeaf(), nextLeafs(), unfinishedLeafs(),
-            depth(0)
+            depth(0),
+            seenStates()
         {
         }
+        Optimizer(const Optimizer&) = delete;
+        Optimizer &operator=(const Optimizer&) = delete;
 
         pair<Cmd, bool> optimize(const World &world,
             chrono::milliseconds timeLimit)
@@ -509,6 +543,12 @@ namespace
                     unfinishedLeafs.pop_front();
                     if(!cur)
                         continue;
+                    if(totalBestLeaf &&
+                        lessDropCriteria(makeCriteria(cur->data),
+                            makeCriteria(totalBestLeaf->data)))
+                    {
+                        continue;
+                    }
                     const auto &cmd = cur->data.cmd;
 //                  if(cmd.getType() == Cmd::TYPE_MOVE)
 //                  {
@@ -531,18 +571,14 @@ namespace
                     // TODO: maybe timeout here
                     if(w.second)
                     {
+                        if(!seenStates.insert(makeReducedState(w.first, nextState)).second)
+                            continue;
                         unfinishedBestLeaf = bestResultNode(
                             unfinishedBestLeaf.lock(), cur);
                         if(w.first.enemies.empty() || w.first.dataPoints.empty())
                         {
                             totalBestLeaf = bestResultNode(
                                 totalBestLeaf, cur);
-                            continue;
-                        }
-                        if(totalBestLeaf &&
-                            lessDropCriteria(makeCriteria(cur->data),
-                                makeCriteria(totalBestLeaf->data)))
-                        {
                             continue;
                         }
                         for(const auto &f : searchCmdProducers)
@@ -673,6 +709,31 @@ namespace
             };
         }
 
+        static ReducedState makeReducedState(const World &w, const State &s)
+        {
+            IdSet enemies;
+            transform(w.enemies.begin(), w.enemies.end(),
+                inserter(enemies, enemies.begin()),
+                [](const EnemyCol::value_type &e) {
+                    return e.id;
+                });
+            IdSet points;
+            transform(w.dataPoints.begin(), w.dataPoints.end(),
+                inserter(points, points.begin()),
+                [](const DataPointCol::value_type &p) {
+                    return p.id;
+                });
+            const auto POS_REDUCER = 2*game::ENEMY_STEP_DIST;
+            return ReducedState{
+                Point{w.player.pos.x/POS_REDUCER,
+                    w.player.pos.y/POS_REDUCER},
+                s.shotsFired,
+                s.totalDamage,
+                enemies,
+                points
+            };
+        }
+
         void reset(const World &world)
         {
             root.reset(new Node{
@@ -689,6 +750,7 @@ namespace
             unfinishedBestLeaf.reset();
             nextLeafs.clear();
             depth = 0;
+            seenStates.clear();
             unfinishedLeafs.clear();
             const State nextState{0, 0};
             for(const auto &f : searchCmdProducers)
@@ -698,13 +760,14 @@ namespace
                 {
                     shared_ptr<Node> node(
                         new Node{
-                        NodeData{
-                        c,
-                        world,
-                        nextState
-                        },
-                        NodePtrCol(),
-                        weak_ptr<Node>(root)});
+                            NodeData{
+                                c,
+                                world,
+                                nextState
+                            },
+                            NodePtrCol(),
+                            weak_ptr<Node>(root)
+                        });
                     root->children.push_back(node);
                     unfinishedLeafs.push_back(node);
                 }
@@ -741,12 +804,62 @@ namespace
         NodeWeakPtrList nextLeafs;
         NodeWeakPtrList unfinishedLeafs;
         size_t depth;
+        ReducedStateSet seenStates;
     };
-    const size_t Optimizer::SURVIVAL_COUNT = 100;
+    const size_t Optimizer::SURVIVAL_COUNT = 200;
 
     class Logic
     {
     public:
+        Logic()
+            :optimizer(CmdFuncCol{
+                [](const World &world) {
+                const auto moveCmd = Cmd::makeMoveCmd(selectPosition(world),
+                    "moving to enemies centroid");
+                return CmdCol{moveCmd};
+                },
+                [](const World &world) {
+                CmdCol res;
+                if(!world.enemies.empty())
+                {
+                const auto enemyPoints = calcEnemyClosestPoints(world);
+                const auto pointEnemyIdx = selectPointEnemy(world,
+                    enemyPoints);
+                assert(pointEnemyIdx < world.enemies.size());
+                const auto &pointEnemy = world.enemies[pointEnemyIdx];
+                const auto closestEnemyIdx = selectClosestEnemy(world);
+                assert(closestEnemyIdx < world.enemies.size());
+                const auto &closestEnemy = world.enemies[closestEnemyIdx];
+                res.push_back(Cmd::makeShootCmd(pointEnemy.id,
+                        "shooting point enemy"));
+                res.push_back(Cmd::makeMoveCmd(nextEnemyPosition(pointEnemy,
+                            enemyPoints[pointEnemyIdx]),
+                        "moving to point enemy"));
+                if(pointEnemy.id != closestEnemy.id)
+                {
+                    res.push_back(Cmd::makeShootCmd(closestEnemy.id,
+                            "shooting closest enemy"));
+                    res.push_back(Cmd::makeMoveCmd(
+                            nextEnemyPosition(closestEnemy,
+                                enemyPoints[closestEnemyIdx]),
+                            "moving to closest enemy"));
+                }
+                }
+                return res;
+                },
+                [](const World &world) {
+                    const auto runPosRes = selectRunPosition(world);
+                    if(runPosRes.second)
+                    {
+                        return CmdCol{Cmd::makeMoveCmd(runPosRes.first,
+                            "running from enemies")};
+                    }
+                    return Logic::CmdCol();
+                }
+            }
+        )
+        {}
+
         Cmd step(const World &world)
         {
             cerr<<"trying optimized step"<<endl;
@@ -958,51 +1071,7 @@ namespace
                         point), game::ENEMY_STEP_DIST));
         }
 
-        Optimizer optimizer = Optimizer(CmdFuncCol{
-            [](const World &world) {
-            const auto moveCmd = Cmd::makeMoveCmd(selectPosition(world),
-                "moving to enemies centroid");
-            return CmdCol{moveCmd};
-            },
-            [](const World &world) {
-                CmdCol res;
-                if(!world.enemies.empty())
-                {
-                    const auto enemyPoints = calcEnemyClosestPoints(world);
-                    const auto pointEnemyIdx = selectPointEnemy(world,
-                        enemyPoints);
-                    assert(pointEnemyIdx < world.enemies.size());
-                    const auto &pointEnemy = world.enemies[pointEnemyIdx];
-                    const auto closestEnemyIdx = selectClosestEnemy(world);
-                    assert(closestEnemyIdx < world.enemies.size());
-                    const auto &closestEnemy = world.enemies[closestEnemyIdx];
-                    res.push_back(Cmd::makeShootCmd(pointEnemy.id,
-                            "shooting point enemy"));
-                    res.push_back(Cmd::makeMoveCmd(nextEnemyPosition(pointEnemy,
-                                enemyPoints[pointEnemyIdx]),
-                            "moving to point enemy"));
-                    if(pointEnemy.id != closestEnemy.id)
-                    {
-                        res.push_back(Cmd::makeShootCmd(closestEnemy.id,
-                                "shooting closest enemy"));
-                        res.push_back(Cmd::makeMoveCmd(
-                                nextEnemyPosition(closestEnemy,
-                                    enemyPoints[closestEnemyIdx]),
-                                "moving to closest enemy"));
-                    }
-                }
-                return res;
-            },
-            [](const World &world) {
-                const auto runPosRes = selectRunPosition(world);
-                if(runPosRes.second)
-                {
-                    return CmdCol{Cmd::makeMoveCmd(runPosRes.first,
-                        "running from enemies")};
-                }
-                return Logic::CmdCol();
-            }
-        });
+        Optimizer optimizer;
     };
 }
 
