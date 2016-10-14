@@ -1,0 +1,24 @@
+#!/usr/bin/env python
+
+import sys
+import re
+
+def run():
+    input_filename = sys.argv[1]
+    output_filename = sys.argv[2]
+    prog = re.compile('#include *".*"')
+    with open(input_filename, 'r') as input_file:
+        with open(output_filename, 'w') as output_file:
+            for line in input_file.readlines():
+                line = line.strip('\n')
+                if line:
+                    with open(line, 'r') as chunk_file:
+                        for chunk_line in chunk_file.readlines():
+                            chunk_line = chunk_line.strip('\n')
+                            if prog.match(chunk_line) is None:
+                                print(chunk_line, file=output_file)
+                else:
+                    print('', file=output_file)
+
+if __name__ == '__main__':
+    run()
