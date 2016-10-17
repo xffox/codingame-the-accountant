@@ -26,6 +26,17 @@ namespace game
         };
     }
 
+    ostream &operator<<(ostream &stream, const game::Enemy &enemy)
+    {
+        return stream<<"{id="<<enemy.id<<",life="<<enemy.life<<",pos="
+            <<enemy.pos<<'}';
+    }
+
+    ostream &operator<<(ostream &stream, const DataPoint &point)
+    {
+        return stream<<"{id="<<point.id<<",pos="<<point.pos<<'}';
+    }
+
     WorldEval::WorldEval(const World &world)
         :world(world), enemiesById(), pointsById(), enemyPoints(),
         totalHealth(0),
@@ -76,7 +87,7 @@ namespace game
                 const auto *closestPointPtr = findDataPoint(enemyPointId);
                 assert(closestPointPtr != nullptr);
                 const auto &closestPoint = *closestPointPtr;
-                if(geom::dist(e.pos, closestPoint.pos) <= game::ENEMY_STEP_DIST)
+                if(static_cast<int>(geom::dist(closestPoint.pos, e.pos)) <= game::ENEMY_STEP_DIST)
                 {
                     world.enemies[i].pos = closestPoint.pos;
                     pointEnemies[closestPoint.id].insert(e.id);
@@ -133,8 +144,7 @@ namespace game
             auto *enemyPtr = findEnemy(cmd.getShootId());
             assert(enemyPtr != nullptr);
             auto &enemy = *enemyPtr;
-            const int damage = round(125000.0/
-                pow(geom::dist(world.player.pos, enemy.pos), 1.2));
+            const int damage = calcDamage(world.player.pos, enemy.pos);
             if(enemy.life > damage)
             {
                 enemy.life -= damage;
@@ -158,7 +168,9 @@ namespace game
         {
             auto iter = pointEnemies.find(p.id);
             if(iter != pointEnemies.end() && deadEnemyId != -1)
+            {
                 iter->second.erase(deadEnemyId);
+            }
             if(iter == pointEnemies.end() || iter->second.empty())
             {
                 nextPoints.push_back(p);
@@ -268,5 +280,11 @@ namespace game
     {
         enemyPoints.clear();
         enemyPoints.resize(getMaxEnemyId()+1, -1);
+    }
+
+    int WorldEval::calcDamage(const geom::Point &player, const geom::Point &enemy)
+    {
+        return round(125000.0/
+            pow(geom::dist(player, enemy), 1.2));
     }
 }

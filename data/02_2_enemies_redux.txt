@@ -1,0 +1,5 @@
+player: pos=(10999,0)
+enemy: id=0 life=10 pos=(2000,5500)
+enemy: id=1 life=10 pos=(15999,5500)
+point: id=0 pos=(8000,5500)
+point: id=1 pos=(4000,5500)

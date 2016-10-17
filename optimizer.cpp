@@ -13,18 +13,18 @@ namespace optimizer
                 p.y >= 0 && p.y <= game::ZONE.y;
         }
 
-        ostream &operator<<(ostream &stream, const optimizer::Criteria &c)
-        {
-            return stream<<"{shots="<<c.shotsFired
-                <<",points="<<c.alivePoints
-                <<",enemies="<<c.aliveEnemies
-                <<",damage="<<c.totalDamage
-                <<'}';
-        }
+    }
+    ostream &operator<<(ostream &stream, const optimizer::Criteria &c)
+    {
+        return stream<<"{shots="<<c.shotsFired
+            <<",points="<<c.alivePoints
+            <<",enemies="<<c.aliveEnemies
+            <<",damage="<<c.totalDamage
+            <<'}';
     }
 
-    Optimizer::Optimizer(CmdFuncCol &&searchCmdProducers)
-        :searchCmdProducers(move(searchCmdProducers)),
+    Optimizer::Optimizer(const CmdFuncCol &searchCmdProducers)
+        :searchCmdProducers(searchCmdProducers),
         root(), nextRoot(), bestLeaf(), totalBestLeaf(),
         unfinishedBestLeaf(), nextLeafs(), unfinishedLeafs(),
         depth(0),
@@ -44,8 +44,6 @@ namespace optimizer
         {
             if(nextRoot->data.world.getWorld() != world)
             {
-                //                  assert(false);
-                //                  printWorldComparison(cerr, world, nextRoot->data.world);
                 cerr<<"predicted world mismatch, reseting optimization tree"<<endl;
                 reset(world);
             }
@@ -97,10 +95,9 @@ namespace optimizer
                 }
                 const State nextState{shotsFired, totalDamage};
                 cur->data.state = nextState;
-                // TODO: maybe timeout here
                 if(validWorld)
                 {
-                    if(!seenStates.insert(makeReducedState(worldEval, nextState, depth)).second)
+                    if(!seenStates.insert(makeReducedState(worldEval, nextState)).second)
                         continue;
                     unfinishedBestLeaf = bestResultNode(
                         unfinishedBestLeaf.lock(), cur);
@@ -137,27 +134,6 @@ namespace optimizer
             {
                 ++depth;
                 assert(unfinishedLeafs.empty());
-                //                  const size_t PRUNE_LIMIT = 800;
-                //                  if(nextLeafs.size() > PRUNE_LIMIT)
-                //                  {
-                //                      nextLeafs.sort(
-                //                          [](const NodeWeakPtrList::value_type &left,
-                //                              const NodeWeakPtrList::value_type &right) {
-                //                              const auto leftLock = left.lock();
-                //                              const auto rightLock = right.lock();
-                //                              if(leftLock && rightLock)
-                //                              {
-                //                                  return makeCriteria(rightLock->data) <
-                //                                      makeCriteria(leftLock->data);
-                //                              }
-                //                              else
-                //                              {
-                //                                  return static_cast<bool>(rightLock) <
-                //                                      static_cast<bool>(leftLock);
-                //                              }
-                //                          });
-                //                      nextLeafs.resize(PRUNE_LIMIT);
-                //                  }
                 unfinishedLeafs = move(nextLeafs);
                 bestLeaf = bestResultNode(
                     totalBestLeaf, unfinishedBestLeaf.lock());
@@ -214,6 +190,19 @@ namespace optimizer
         }
     }
 
+    pair<Criteria, bool> Optimizer::bestCriteria() const
+    {
+        auto bestLeafLock = bestLeaf.lock();
+        if(bestLeafLock)
+        {
+            return make_pair(makeCriteria(bestLeafLock->data), true);
+        }
+        else
+        {
+            return make_pair(Criteria{}, false);
+        }
+    }
+
     void Optimizer::reset(const game::World &world)
     {
         const State nextState{0, 0};
@@ -255,7 +244,7 @@ namespace optimizer
     }
 
     ReducedState Optimizer::makeReducedState(
-        const game::WorldEval &worldEval, const State &s, size_t depth)
+        const game::WorldEval &worldEval, const State &s)
     {
         const auto &w = worldEval.getWorld();
         FlagCol enemies(worldEval.getMaxEnemyId()+1, false);

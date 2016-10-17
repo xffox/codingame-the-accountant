@@ -32,62 +32,6 @@ namespace
 {
     using EnemyMap = unordered_map<int, game::Enemy>;
     using DataPointMap = unordered_map<int, game::DataPoint>;
-
-    ostream &operator<<(ostream &stream, const game::Enemy &enemy)
-    {
-        return stream<<"{id="<<enemy.id<<",life="<<enemy.life<<",pos="
-            <<enemy.pos<<'}';
-    }
-
-    ostream &operator<<(ostream &stream, const game::DataPoint &point)
-    {
-        return stream<<"{id="<<point.id<<",pos="<<point.pos<<'}';
-    }
-
-    void printWorldComparison(ostream &stream, const game::World &actual,
-        const game::World &predicted)
-    {
-        if(predicted.player.pos != actual.player.pos)
-        {
-            stream<<"player prediction error: pred="
-                <<predicted.player.pos
-                <<" actual="<<actual.player.pos<<endl;
-        }
-        if(predicted.enemies.size() != actual.enemies.size())
-        {
-            stream<<"enemies prediction size mismatch: pred="
-                <<predicted.enemies.size()
-                <<" actual="<<actual.enemies.size()<<endl;
-        }
-        else
-        {
-            for(size_t i = 0; i < actual.enemies.size(); ++i)
-            {
-                if(actual.enemies[i] != predicted.enemies[i])
-                {
-                    stream<<"enemies prediction error: pred="<<predicted.enemies[i]
-                        <<" actual="<<actual.enemies[i]<<endl;
-                }
-            }
-        }
-        if(predicted.dataPoints.size() != actual.dataPoints.size())
-        {
-            stream<<"points prediction size mismatch: pred="
-                <<predicted.dataPoints.size()
-                <<" actual="<<actual.dataPoints.size()<<endl;
-        }
-        else
-        {
-            for(size_t i = 0; i < actual.dataPoints.size(); ++i)
-            {
-                if(actual.dataPoints[i] != predicted.dataPoints[i])
-                {
-                    stream<<"points prediction error: pred="<<predicted.dataPoints[i]
-                        <<" actual="<<actual.dataPoints[i]<<endl;
-                }
-            }
-        }
-    }
 }
 
 int main()
@@ -115,6 +59,11 @@ int main()
             cin>>e.id>>e.pos.x>>e.pos.y>>e.life; cin.ignore();
             world.enemies.push_back(e);
         }
+//      cerr<<"player: pos="<<world.player.pos<<endl;
+//      for(const auto &e : world.enemies)
+//          cerr<<"enemy: id="<<e.id<<" life="<<e.life<<" pos="<<e.pos<<endl;
+//      for(const auto &p : world.dataPoints)
+//          cerr<<"point: id="<<p.id<<" pos="<<p.pos<<endl;
         const auto cmd = logic.step(world);
         switch(cmd.getType())
         {

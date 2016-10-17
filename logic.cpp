@@ -14,69 +14,7 @@ namespace logic
     }
 
     Logic::Logic()
-        :optimizer(optimizer::CmdFuncCol{
-            [](const game::WorldEval &worldEval) {
-                const auto &world = worldEval.getWorld();
-                CmdCol res;
-                if(!world.enemies.empty())
-                {
-                const auto enemyPoints = calcEnemyClosestPoints(world);
-                const auto closestEnemyIdx = selectClosestEnemy(world);
-                assert(closestEnemyIdx < world.enemies.size());
-                const auto pointEnemyIdx = selectPointEnemy(worldEval);
-                assert(pointEnemyIdx < world.enemies.size());
-                const auto &pointEnemy = world.enemies[pointEnemyIdx];
-                const auto &closestEnemy = world.enemies[closestEnemyIdx];
-                res.push_back(game::Cmd::makeShootCmd(pointEnemy.id,
-                        "shooting point enemy"));
-                double step = game::PLAYER_STEP_DIST;
-                const auto closestEnemyDist = geom::dist(
-                    world.player.pos, nextEnemyPosition(closestEnemy,
-                        enemyPoints[closestEnemyIdx]));
-                if(step + game::DEATH_DIST >= closestEnemyDist)
-                step = closestEnemyDist - game::DEATH_DIST - 5.0;
-                res.push_back(game::Cmd::makeMoveCmd(
-                        geom::add(world.player.pos,
-                            geom::mult(
-                                geom::normDirection(world.player.pos,
-                                    nextEnemyPosition(pointEnemy,
-                                        enemyPoints[pointEnemyIdx])),
-                                step)),
-                        "moving to point enemy"));
-                //                  res.push_back(Cmd::makeMoveCmd(enemyPoints[closestEnemyIdx],
-                //                          "moving to closest enemy destination"));
-                if(pointEnemyIdx != closestEnemyIdx)
-                {
-                    res.push_back(game::Cmd::makeShootCmd(closestEnemy.id,
-                            "shooting closest enemy"));
-                    res.push_back(game::Cmd::makeMoveCmd(
-                            geom::add(world.player.pos,
-                                geom::mult(
-                                    geom::normDirection(world.player.pos,
-                                        nextEnemyPosition(closestEnemy,
-                                            enemyPoints[closestEnemyIdx])),
-                                    step)),
-                            "moving to closest enemy"));
-                }
-                }
-                return res;
-            },
-                [](const game::WorldEval &worldEval) {
-                    const auto moveCmd = game::Cmd::makeMoveCmd(selectPosition(worldEval.getWorld()),
-                        "moving to enemies centroid");
-                    return CmdCol{moveCmd};
-                },
-                [](const game::WorldEval &worldEval) {
-                    const auto runPosRes = selectRunPosition(worldEval.getWorld());
-                    if(runPosRes.second)
-                    {
-                        return CmdCol{game::Cmd::makeMoveCmd(runPosRes.first,
-                            "running from enemies")};
-                    }
-                    return Logic::CmdCol();
-                }
-        }
-    )
+        :optimizer(searchFuncs)
     {}
 
     game::Cmd Logic::step(const game::World &world)
@@ -291,4 +229,67 @@ namespace logic
             geom::mult(geom::normDirection(enemy.pos,
                     point), game::ENEMY_STEP_DIST));
     }
+
+    const optimizer::CmdFuncCol Logic::searchFuncs{
+        [](const game::WorldEval &worldEval) {
+            const auto &world = worldEval.getWorld();
+            CmdCol res;
+            if(!world.enemies.empty())
+            {
+                const auto enemyPoints = calcEnemyClosestPoints(world);
+                const auto closestEnemyIdx = selectClosestEnemy(world);
+                assert(closestEnemyIdx < world.enemies.size());
+                const auto pointEnemyIdx = selectPointEnemy(worldEval);
+                assert(pointEnemyIdx < world.enemies.size());
+                const auto &pointEnemy = world.enemies[pointEnemyIdx];
+                const auto &closestEnemy = world.enemies[closestEnemyIdx];
+                res.push_back(game::Cmd::makeShootCmd(pointEnemy.id,
+                        "shooting point enemy"));
+                double step = game::PLAYER_STEP_DIST;
+                const auto closestEnemyDist = geom::dist(
+                    world.player.pos, nextEnemyPosition(closestEnemy,
+                        enemyPoints[closestEnemyIdx]));
+                if(step + game::DEATH_DIST >= closestEnemyDist)
+                    step = closestEnemyDist - game::DEATH_DIST - 5.0;
+                res.push_back(game::Cmd::makeMoveCmd(
+                        geom::add(world.player.pos,
+                            geom::mult(
+                                geom::normDirection(world.player.pos,
+                                    nextEnemyPosition(pointEnemy,
+                                        enemyPoints[pointEnemyIdx])),
+                                step)),
+                        "moving to point enemy"));
+                //                  res.push_back(Cmd::makeMoveCmd(enemyPoints[closestEnemyIdx],
+                //                          "moving to closest enemy destination"));
+                if(pointEnemyIdx != closestEnemyIdx)
+                {
+                    res.push_back(game::Cmd::makeShootCmd(closestEnemy.id,
+                            "shooting closest enemy"));
+                    res.push_back(game::Cmd::makeMoveCmd(
+                            geom::add(world.player.pos,
+                                geom::mult(
+                                    geom::normDirection(world.player.pos,
+                                        nextEnemyPosition(closestEnemy,
+                                            enemyPoints[closestEnemyIdx])),
+                                    step)),
+                            "moving to closest enemy"));
+                }
+            }
+            return res;
+        },
+        [](const game::WorldEval &worldEval) {
+            const auto moveCmd = game::Cmd::makeMoveCmd(selectPosition(worldEval.getWorld()),
+                "moving to enemies centroid");
+            return CmdCol{moveCmd};
+        },
+        [](const game::WorldEval &worldEval) {
+            const auto runPosRes = selectRunPosition(worldEval.getWorld());
+            if(runPosRes.second)
+            {
+                return CmdCol{game::Cmd::makeMoveCmd(runPosRes.first,
+                    "running from enemies")};
+            }
+            return Logic::CmdCol();
+        }
+    };
 }

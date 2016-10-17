@@ -7,6 +7,7 @@
 #include <memory>
 #include <set>
 #include <list>
+#include <ostream>
 
 #include "game.h"
 
@@ -37,6 +38,7 @@ namespace optimizer
                  (left.shotsFired == right.shotsFired &&
                   left.totalDamage < right.totalDamage))))));
     }
+    ostream &operator<<(ostream &stream, const optimizer::Criteria &c);
 
     using FlagCol = vector<bool>;
     struct ReducedState
@@ -65,12 +67,14 @@ namespace optimizer
     class Optimizer
     {
     public:
-        Optimizer(CmdFuncCol &&searchCmdProducers);
+        Optimizer(const CmdFuncCol &searchCmdProducers);
         Optimizer(const Optimizer&) = delete;
         Optimizer &operator=(const Optimizer&) = delete;
 
         pair<game::Cmd, bool> optimize(const game::World &world,
             chrono::milliseconds timeLimit);
+
+        pair<Criteria, bool> bestCriteria() const;
 
     private:
         struct State
@@ -109,8 +113,7 @@ namespace optimizer
             return (left.alivePoints < right.alivePoints);
         }
 
-        static ReducedState makeReducedState(const game::WorldEval &w, const State &s,
-            size_t depth);
+        static ReducedState makeReducedState(const game::WorldEval &w, const State &s);
         void reset(const game::World &world);
         static shared_ptr<Node> bestResultNode(shared_ptr<Node> left,
             shared_ptr<Node> right);

@@ -21,6 +21,8 @@ namespace logic
 
         game::Cmd step(const game::World &world);
 
+        static const optimizer::CmdFuncCol searchFuncs;
+
     private:
         using CmdCol = vector<game::Cmd>;
 

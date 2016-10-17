@@ -8,6 +8,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <ostream>
 
 #include "geom.h"
 
@@ -30,6 +31,7 @@ namespace game
     {
         return !(left == right);
     }
+    ostream &operator<<(ostream &stream, const game::Enemy &enemy);
 
     struct DataPoint
     {
@@ -44,6 +46,7 @@ namespace game
     {
         return !(left == right);
     }
+    ostream &operator<<(ostream &stream, const game::DataPoint &point);
 
     struct Player
     {
@@ -173,6 +176,8 @@ namespace game
         {
             return maxDataPointId;
         }
+
+        static int calcDamage(const geom::Point &player, const geom::Point &enemy);
 
     private:
         using IdIdxCol = vector<int>;
